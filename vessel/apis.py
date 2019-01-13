@@ -17,7 +17,7 @@ class VesselInfoViewSet(ModelViewSet):
 
     def list(self, request):
         try:
-            client_address = request.META['TTP_X_FORWARDED_FOR']
+            client_address = request.META['HTTP_X_FORWARDED_FOR']
         except:
             client_address = request.META['REMOTE_ADDR']
         print(client_address)
