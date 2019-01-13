@@ -15,12 +15,11 @@ class VesselInfoViewSet(ModelViewSet):
     permission_classes = (AllowAny,)
     throttle_scope = 'vessel-info'
 
-    # def list(self, request):
-    #     import pdb; pdb.set_trace()
-    #     try:
-    #         client_address = request.META['TTP_X_FORWARDED_FOR']
-    #     except:
-    #         client_address = request.META['REMOTE_ADDR']
-    #     print(client_address)
-    #     return True
+    def list(self, request):
+        try:
+            client_address = request.META['TTP_X_FORWARDED_FOR']
+        except:
+            client_address = request.META['REMOTE_ADDR']
+        print(client_address)
+        return super().list(self, request)
 
