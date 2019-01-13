@@ -1,28 +1,219 @@
-import logging
-from rest_framework import response
+import time
+from django.core.cache import cache as default_cache
+from django.core.exceptions import ImproperlyConfigured
+from rest_framework.settings import api_settings
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import exception_handler
 from rest_framework.exceptions import Throttled
 
-LOGGER = logging.getLogger('api')
+from vessel.models import BlockIP
 
 
 def custom_exception_handler(exc, context):
-    # Call REST framework's default exception handler first,
-    # to get the standard error response.
     response = exception_handler(exc, context)
 
     if isinstance(exc, Throttled):
-        # import pdb; pdb.set_trace()
         custom_response_data = {
-            'message': 'request limit exceeded',
-            'availableIn': '%d seconds'%exc.wait,
-            'pranesh': "ldfjglkj"
+            'message': 'Your IP Blocked',
+            # 'availableIn': '%d seconds'%exc.wait,
         }
-        # try:
-        #     client_address = contextrequest.META[‘HTTP_X_FORWARDED_FOR’]
-        # except:
-        #     client_address = request.META[‘REMOTE_ADDR’]
-        # LOGGER.error({})
-        response.data = custom_response_data # set the custom response data on response object
+        response.data = custom_response_data
+        response.status_code = 403
 
     return response
+
+
+class SimpleRateThrottle(BaseThrottle):
+    """
+    A simple cache implementation, that only requires `.get_cache_key()`
+    to be overridden.
+
+    The rate (requests / seconds) is set by a `rate` attribute on the View
+    class.  The attribute is a string of the form 'number_of_requests/period'.
+
+    Period should be one of: ('s', 'sec', 'm', 'min', 'h', 'hour', 'd', 'day')
+
+    Previous request information used for throttling is stored in the cache.
+    """
+    cache = default_cache
+    timer = time.time
+    cache_format = 'throttle_%(scope)s_%(ident)s'
+    scope = None
+    THROTTLE_RATES = api_settings.DEFAULT_THROTTLE_RATES
+
+    def __init__(self):
+        if not getattr(self, 'rate', None):
+            self.rate = self.get_rate()
+        self.num_requests, self.duration = self.parse_rate(self.rate)
+
+    def get_cache_key(self, request, view):
+        """
+        Should return a unique cache-key which can be used for throttling.
+        Must be overridden.
+
+        May return `None` if the request should not be throttled.
+        """
+        raise NotImplementedError('.get_cache_key() must be overridden')
+
+    def get_rate(self):
+        """
+        Determine the string representation of the allowed request rate.
+        """
+        if not getattr(self, 'scope', None):
+            msg = ("You must set either `.scope` or `.rate` for '%s' throttle" %
+                   self.__class__.__name__)
+            raise ImproperlyConfigured(msg)
+
+        try:
+            return self.THROTTLE_RATES[self.scope]
+        except KeyError:
+            msg = "No default throttle rate set for '%s' scope" % self.scope
+            raise ImproperlyConfigured(msg)
+
+    def parse_rate(self, rate):
+        """
+        Given the request rate string, return a two tuple of:
+        <allowed number of requests>, <period of time in seconds>
+        """
+        if rate is None:
+            return (None, None)
+        num, period = rate.split('/')
+        num_requests = int(num)
+        duration = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[period[0]]
+        return (num_requests, duration)
+
+    def allow_request(self, request, view):
+        """
+        Implement the check to see if the request should be throttled.
+
+        On success calls `throttle_success`.
+        On failure calls `throttle_failure`.
+        """
+        if self.rate is None:
+            return True
+
+        self.key = self.get_cache_key(request, view)
+        if self.key is None:
+            return True
+
+        self.history = self.cache.get(self.key, [])
+        self.now = self.timer()
+
+        # Drop any requests from the history which have now passed the
+        # throttle duration
+        while self.history and self.history[-1] <= self.now - self.duration:
+            self.history.pop()
+        if len(self.history) >= self.num_requests:
+            return self.throttle_failure()
+        return self.throttle_success(request)
+
+    def throttle_success(self, request):
+        """
+        Inserts the current request's timestamp along with the key
+        into the cache.
+        """
+        self.history.insert(0, self.now)
+        self.cache.set(self.key, self.history, self.duration)
+        return True
+
+    def throttle_failure(self):
+        """
+        Called when a request to the API has failed due to throttling.
+        """
+        return False
+
+    def wait(self, request):
+        """
+        Returns the recommended next request time in seconds.
+        """
+        if self.history:
+            remaining_duration = self.duration - (self.now - self.history[-1])
+        else:
+            remaining_duration = self.duration
+
+        available_requests = self.num_requests - len(self.history) + 1
+        if available_requests <= 0:
+            return None
+
+        return remaining_duration / float(available_requests)
+
+
+class ScopedRateThrottle(SimpleRateThrottle):
+    """
+    Limits the rate of API calls by different amounts for various parts of
+    the API.  Any view that has the `throttle_scope` property set will be
+    throttled.  The unique cache key will be generated by concatenating the
+    user id of the request, and the scope of the view being accessed.
+    """
+    scope_attr = 'throttle_scope'
+
+    def __init__(self):
+        # Override the usual SimpleRateThrottle, because we can't determine
+        # the rate until called by the view.
+        pass
+
+    def allow_request(self, request, view):
+        # We can only determine the scope once we're called by the view.
+        self.scope = getattr(view, self.scope_attr, None)
+
+        # If a view does not have a `throttle_scope` always allow the request
+        if not self.scope:
+            return True
+        try:
+            self.client_address = request.META['HTTP_X_FORWARDED_FOR']
+        except KeyError:
+            self.client_address = request.META['REMOTE_ADDR']
+        # Determine the allowed request rate as we normally would during
+        # the `__init__` call.
+        self.rate = self.get_rate()
+        self.num_requests, self.duration = self.parse_rate(self.rate)
+
+        # We can now proceed as normal.
+        return super(ScopedRateThrottle, self).allow_request(request, view)
+
+    def get_cache_key(self, request, view):
+        """
+        If `view.throttle_scope` is not set, don't apply this throttle.
+
+        Otherwise generate the unique cache key by concatenating the user id
+        with the '.throttle_scope` property of the view.
+        """
+        if request.user.is_authenticated:
+            ident = request.user.pk
+        else:
+            ident = self.get_ident(request)
+
+        return self.cache_format % {
+            'scope': self.scope,
+            'ident': ident
+        }
+
+    def throttle_success(self, request):
+        """
+        Inserts the current request's timestamp along with the key
+        into the cache.
+        """
+        self.history.insert(0, self.now)
+        self.cache.set(self.key, self.history, self.duration)
+        try:
+            ip = BlockIP.objects.get(ip=self.client_address)
+            if ip.block_status:
+                return False
+        except BlockIP.DoesNotExist:
+            BlockIP.objects.create(ip=self.client_address)
+
+        return True
+
+    def wait(self,):
+        """
+        Returns the recommended next request time in seconds.
+        """
+        if self.history:
+            remaining_duration = self.duration - (self.now - self.history[-1])
+        else:
+            remaining_duration = self.duration
+        available_requests = self.num_requests - len(self.history) + 1
+        if available_requests <= 0:
+            return None
+        BlockIP.objects.update_or_create(ip=self.client_address, defaults={"block_status": True})
+        return remaining_duration / float(available_requests)

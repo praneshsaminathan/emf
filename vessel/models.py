@@ -12,6 +12,24 @@ class BaseModel(models.Model):
         abstract = True
 
 
+class BlockIP(BaseModel):
+    ip = models.GenericIPAddressField(
+        verbose_name=_('IP'),
+        help_text=_('IP Address'),
+        unique=True
+    )
+    block_status = models.BooleanField(
+        verbose_name=_('Status'),
+        help_text=_('Block Status'),
+        default=False
+    )
+
+    def __str__(self):
+        """docstring for object"""
+
+        return str(self.ip)
+
+
 class VesselInfo(BaseModel):
 
     speed = models.IntegerField(

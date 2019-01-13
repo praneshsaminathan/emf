@@ -137,7 +137,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.BasicAuthentication',
     ),
     'DEFAULT_THROTTLE_CLASSES': (
-        'rest_framework.throttling.ScopedRateThrottle',
+        'sampletask.utils.custom_throttle.ScopedRateThrottle',
     ),
     'DEFAULT_THROTTLE_RATES': {
         # 'anon': '2/day',
@@ -147,33 +147,32 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'sampletask.utils.custom_throttle.custom_exception_handler'
 }
 
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': True,
-    'formatters': {
-        'standard': {
-            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-        },
-    },
-    'handlers': {
-        'api': {
-            'level': 'DEBUG',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(BASE_DIR,'logs/api.log'),
-            'maxBytes': 1024*1024*5, # 5 MB
-            'backupCount': 5,
-            'formatter': 'standard',
-        },
-
-    },
-    'loggers': {
-        'api': {
-            'handlers': ['api'],
-            'level': 'DEBUG',
-            'propagate': True
-        },
-    }
-}
-
+# LOGGING = {
+#     'version': 1,
+#     'disable_existing_loggers': True,
+#     'formatters': {
+#         'standard': {
+#             'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+#         },
+#     },
+#     'handlers': {
+#         'api': {
+#             'level': 'DEBUG',
+#             'class': 'logging.handlers.RotatingFileHandler',
+#             'filename': os.path.join(BASE_DIR, 'logs/api.log'),
+#             'maxBytes': 1024*1024*5, # 5 MB
+#             'backupCount': 5,
+#             'formatter': 'standard',
+#         },
+#
+#     },
+#     'loggers': {
+#         'api': {
+#             'handlers': ['api'],
+#             'level': 'DEBUG',
+#             'propagate': True
+#         },
+#     }
+# }
 import django_heroku
 django_heroku.settings(locals())
