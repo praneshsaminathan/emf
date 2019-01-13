@@ -142,7 +142,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         # 'anon': '2/day',
         # 'user': '2/day',
-        'vessel-info': '2/min',
+        'vessel-info': '10/min',
     },
     'EXCEPTION_HANDLER': 'sampletask.utils.custom_throttle.custom_exception_handler'
 }
